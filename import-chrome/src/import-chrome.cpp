@@ -266,7 +266,7 @@ int main( int argc, char** argv )
             }
         }
 
-        if( type == "b" || type == "B" || type== "n" || type== "N" )
+        if( type == "b" || type == "B" )
         {
             timeline.emplace_back( tracy::Worker::ImportEventTimeline {
                 getPseudoTid(v),
@@ -288,7 +288,6 @@ int main( int argc, char** argv )
                 true
             } );
         }
-        /*
         else if( type== "n" || type== "N" ) 
         {
             // n tag means the timer resolution was to small, so there is only one time sample with the same begin and end time 
@@ -310,7 +309,7 @@ int main( int argc, char** argv )
                 std::move(zoneText),
                 true
             } );
-        }*/
+        }
         else if( type == "X" )
         {
             const auto tid = getPseudoTid(v);

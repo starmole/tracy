@@ -11,6 +11,10 @@
 
 #include <sys/stat.h>
 
+#ifdef HAVE_ZLIB
+#include <zlib.h>
+#endif
+
 #ifdef _MSC_VER
 #  define stat64 _stat64
 #endif
@@ -32,6 +36,38 @@ void Usage()
     printf( "Usage: import-chrome input.json output.tracy\n\n" );
     exit( 1 );
 }
+
+char* MapInputFile ( const char *input, off_t &zsz )
+{
+    FILE* f = fopen( input, "rb" );
+    if( !f )
+    {
+        fprintf( stderr, "Cannot open input file!\n" );
+        exit( 1 );
+    }
+    struct stat64 sb;
+    if( stat64( input, &sb ) != 0 )
+    {
+        fprintf( stderr, "Cannot open input file!\n" );
+        fclose( f );
+        exit( 1 );
+    }
+
+    zsz = sb.st_size;
+    auto zbuf = (char*)mmap( nullptr, zsz, PROT_READ, MAP_SHARED, fileno( f ), 0 );
+    fclose( f );
+    if( !zbuf )
+    {
+        fprintf( stderr, "Cannot mmap input file!\n" );
+        exit( 1 );
+    }
+    return zbuf;
+}
+
+void UnMapInputFile (char *zbuf, off_t zsz)
+{
+    munmap( zbuf, zsz );
+} 
 
 int main( int argc, char** argv )
 {
@@ -56,31 +92,10 @@ int main( int argc, char** argv )
     json j;
 
     const auto fnsz = strlen( input );
-    if( fnsz > 4 && memcmp( input+fnsz-4, ".zst", 4 ) == 0 )
+    if( fnsz > 4 && memcmp( input+fnsz-4, ".zst", 4 ) == 0 ) 
     {
-        FILE* f = fopen( input, "rb" );
-        if( !f )
-        {
-            fprintf( stderr, "Cannot open input file!\n" );
-            exit( 1 );
-        }
-        struct stat64 sb;
-        if( stat64( input, &sb ) != 0 )
-        {
-            fprintf( stderr, "Cannot open input file!\n" );
-            fclose( f );
-            exit( 1 );
-        }
-
-        const auto zsz = sb.st_size;
-        auto zbuf = (char*)mmap( nullptr, zsz, PROT_READ, MAP_SHARED, fileno( f ), 0 );
-        fclose( f );
-        if( !zbuf )
-        {
-            fprintf( stderr, "Cannot mmap input file!\n" );
-            exit( 1 );
-        }
-
+        off_t zsz = 0;
+        auto zbuf = MapInputFile(input, zsz);
         auto zctx = ZSTD_createDStream();
         ZSTD_initDStream( zctx );
 
@@ -100,7 +115,7 @@ int main( int argc, char** argv )
             {
                 ZSTD_freeDStream( zctx );
                 delete[] tmp;
-                fprintf( stderr, "Couldn't decompress input file (%s)!\n", ZSTD_getErrorName( res ) );
+                fprintf( stderr, "ZSTD: Couldn't decompress input file (%s)!\n", ZSTD_getErrorName( res ) );
                 exit( 1 );
             }
             if( zout.pos > 0 )
@@ -114,10 +129,43 @@ int main( int argc, char** argv )
 
         ZSTD_freeDStream( zctx );
         delete[] tmp;
-        munmap( zbuf, zsz );
+        UnMapInputFile(zbuf, zsz);
 
         j = json::parse( buf.begin(), buf.end() );
+    } 
+#ifdef HAVE_ZLIB
+    else if (fnsz > 8 && memcmp( input+fnsz-8, ".json.gz", 8 ) == 0 ) 
+    {
+        off_t zsz = 0;
+        auto zbuf = MapInputFile(input, zsz);
+        std::vector<uint8_t> outbuf;
+        z_stream s{};
+        inflateInit2(&s, MAX_WBITS+32);
+        s.avail_in = zsz;
+        s.next_in = (Bytef *)zbuf;
+        for(;;) {
+            char buf[1024*1024];
+            s.next_out = (Bytef *)buf;
+            s.avail_out = sizeof(buf);
+            auto err = inflate(&s, Z_NO_FLUSH);
+            auto nread = sizeof(buf) - s.avail_out;
+            if ( nread>0 ) {
+                auto desti = outbuf.size(); 
+                outbuf.resize(outbuf.size()+nread);
+                memcpy(outbuf.data()+desti, buf, nread);
+            }
+            if ( err == Z_STREAM_END )
+                break;
+            if (err != Z_OK) {
+                fprintf( stderr, "ZLib: Couldn't decompress input file (%s)!\n", s.msg);
+                exit(0);
+            }  
+        }
+        inflateEnd(&s);
+        UnMapInputFile(zbuf, zsz);
+        j = json::parse( outbuf.begin(), outbuf.end() );
     }
+#endif
     else
     {
         std::ifstream is( input );
@@ -218,7 +266,7 @@ int main( int argc, char** argv )
             }
         }
 
-        if( type == "b" || type == "B" )
+        if( type == "b" || type == "B" || type== "n" || type== "N" )
         {
             timeline.emplace_back( tracy::Worker::ImportEventTimeline {
                 getPseudoTid(v),
@@ -240,6 +288,29 @@ int main( int argc, char** argv )
                 true
             } );
         }
+        /*
+        else if( type== "n" || type== "N" ) 
+        {
+            // n tag means the timer resolution was to small, so there is only one time sample with the same begin and end time 
+            const auto ts = uint64_t( v["ts"].get<double>() * 1000. );
+            const auto tid = getPseudoTid(v);
+            timeline.emplace_back( tracy::Worker::ImportEventTimeline {
+                tid,
+                ts,
+                v["name"].get<std::string>(),
+                std::move(zoneText),
+                false,
+                std::move(locFile),
+                locLine
+            } );
+            timeline.emplace_back( tracy::Worker::ImportEventTimeline {
+                tid,
+                ts + 5000, // 5000usec is the minimum meassured performance.now() timer resolution on Chrome (COOP mode)
+                "",
+                std::move(zoneText),
+                true
+            } );
+        }*/
         else if( type == "X" )
         {
             const auto tid = getPseudoTid(v);

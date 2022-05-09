@@ -528,8 +528,10 @@ Worker::Worker( const char* name, const char* program, const std::vector<ImportE
         }
     }
 
-    m_data.framesBase->frames.push_back( FrameEvent{ 0, -1, -1 } );
-    m_data.framesBase->frames.push_back( FrameEvent{ 0, -1, -1 } );
+    if ( m_data.framesBase->frames.size() == 0 ) 
+        m_data.framesBase->frames.push_back( FrameEvent{ 0, -1, -1 } );
+    if ( m_data.framesBase->frames.size() == 1 ) 
+        m_data.framesBase->frames.push_back( FrameEvent{ 0, -1, -1 } );
 }
 
 Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )

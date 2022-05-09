@@ -81,10 +81,14 @@ int main( int argc, char** argv )
 
     tracy::FileWrite::Compression clev = tracy::FileWrite::Compression::Fast;
 
-    if( argc != 3 ) Usage();
+    if( argc < 3 ) Usage();
 
     const char* input = argv[1];
     const char* output = argv[2];
+
+    std::string frameName = "onRenderDocument";
+    if ( argc >= 4 )
+        frameName = argv[3];
 
     printf( "Loading...\r" );
     fflush( stdout );
@@ -277,6 +281,14 @@ int main( int argc, char** argv )
                 std::move(locFile),
                 locLine
             } );
+            if ( v["name"].get<std::string>()==frameName ) {
+                messages.emplace_back( tracy::Worker::ImportEventMessages {
+                    getPseudoTid(v),
+                    uint64_t( v["ts"].get<double>() * 1000. ),
+                    v["name"].get<std::string>(),
+                    true
+                } );         
+            }
         }
         else if( type == "e" || type == "E" )
         {
@@ -324,7 +336,8 @@ int main( int argc, char** argv )
             messages.emplace_back( tracy::Worker::ImportEventMessages {
                 getPseudoTid(v),
                 uint64_t( v["ts"].get<double>() * 1000. ),
-                v["name"].get<std::string>()
+                v["name"].get<std::string>(),
+                v["name"].get<std::string>() == frameName
             } );
         }
         else if( type == "C" )

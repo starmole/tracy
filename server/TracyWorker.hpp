@@ -108,6 +108,7 @@ public:
         uint64_t tid;
         uint64_t timestamp;
         std::string message;
+        bool isFrame; 
     };
 
     struct ImportEventPlots

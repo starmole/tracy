@@ -329,6 +329,17 @@ Worker::Worker( const char* name, const char* program, const std::vector<ImportE
     m_data.memory = m_slab.AllocInit<MemData>();
     m_data.memNameMap.emplace( 0, m_data.memory );
 
+    m_data.framesBase = m_data.frames.Retrieve( 0, [this] ( uint64_t name ) {
+        auto fd = m_slab.AllocInit<FrameData>();
+        fd->name = name;
+        fd->continuous = 1;
+        return fd;
+    }, [this] ( uint64_t name ) {
+        assert( name == 0 );
+        char tmp[6] = "Frame";
+        HandleFrameName( name, tmp, 5 );
+    } );
+
     m_data.lastTime = 0;
     if( !timeline.empty() )
     {
@@ -438,6 +449,14 @@ Worker::Worker( const char* name, const char* program, const std::vector<ImportE
             m_threadCtxData = nullptr;
         }
         InsertMessageData( msg );
+
+        if ( v.isFrame ) {
+            FrameEvent msg;
+            msg.start = v.timestamp;
+            msg.end = -1;
+            msg.frameImage = -1;
+            m_data.framesBase->frames.push_back( msg );
+        }
     }
 
     for( auto& v : plots )
@@ -508,17 +527,6 @@ Worker::Worker( const char* name, const char* program, const std::vector<ImportE
             AddThreadString( t.first, buf, len );
         }
     }
-
-    m_data.framesBase = m_data.frames.Retrieve( 0, [this] ( uint64_t name ) {
-        auto fd = m_slab.AllocInit<FrameData>();
-        fd->name = name;
-        fd->continuous = 1;
-        return fd;
-    }, [this] ( uint64_t name ) {
-        assert( name == 0 );
-        char tmp[6] = "Frame";
-        HandleFrameName( name, tmp, 5 );
-    } );
 
     m_data.framesBase->frames.push_back( FrameEvent{ 0, -1, -1 } );
     m_data.framesBase->frames.push_back( FrameEvent{ 0, -1, -1 } );
